@@ -14,6 +14,8 @@ type Job struct {
 	Attempts   int             `json:"attempts"`
 	MaxRetries int             `json:"max_retries"`
 	CreatedAt  time.Time       `json:"created_at"`
+
+	raw string // serialized form currently in Redis; needed for LRem/ZRem
 }
 
 func NewJob(jobType string, payload any) (*Job, error) {
@@ -28,4 +30,8 @@ func NewJob(jobType string, payload any) (*Job, error) {
 		MaxRetries: 3,
 		CreatedAt:  time.Now().UTC(),
 	}, nil
+}
+
+func (j *Job) Raw() string {
+	return j.raw
 }

@@ -48,12 +48,19 @@ func (w *Worker) process(ctx context.Context, job *queue.Job) {
 	h, err := w.reg.Get(job.Type)
 	if err != nil {
 		log.Printf("job %s: %v", w.id, job.ID, err)
-		w.q.Ack(ctx, job) // Phase 3: DLQ instead
+		job.Attempts = job.MaxRetries // force DLQ
+		w.q.Fail(ctx, job)
 		return
 	}
+	ackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	if err := h(ctx, job.Payload); err != nil {
-		log.Printf("[w%d] job %s failed: %v", w.id, job.ID, err) // Phase 3: retry logic here
+		log.Printf("[w%d] job %s failed: %v", w.id, job.ID, err)
+		w.q.Fail(ackCtx, job)
+		return
 	}
-	w.q.Ack(ctx, job)
+	if err := w.q.Ack(ackCtx, job); err != nil {
+		log.Printf("[w%d] ack failed for %s: %v", w.id, job.ID, err)
+	}
 	log.Printf("[w%d] job %s done", w.id, job.ID)
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"os/signal"
 	"syscall"
 	"time"
@@ -30,6 +31,20 @@ func main() {
 		return nil
 	})
 
+	reg.Register("flaky", func(ctx context.Context, payload json.RawMessage) error {
+		if rand.Float64() < 0.7 {
+			return fmt.Errorf("simulated failure")
+		}
+		return nil
+	})
+
+	for i := 0; i < 5; i++ {
+		j, _ := queue.NewJob("flaky", map[string]string{"n": fmt.Sprint(i)})
+		if err := q.Enqueue(ctx, j); err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	// seed some jobs for testing
 	for i := 0; i < 20; i++ {
 		j, _ := queue.NewJob("send_email", map[string]string{
@@ -40,5 +55,6 @@ func main() {
 		}
 	}
 
+	go worker.RunMaintenance(ctx, q)
 	worker.NewPool(q, reg, 4).Run(ctx)
 }
