@@ -13,6 +13,7 @@ import (
 type Worker struct {
 	q   *queue.Queue
 	reg *Registry
+	id  int
 }
 
 func New(q *queue.Queue, reg *Registry) *Worker {
@@ -23,7 +24,7 @@ func (w *Worker) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("worker shutting down")
+			log.Printf("[w%d] worker shutting down", w.id)
 			return
 		default:
 		}
@@ -43,16 +44,16 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) process(ctx context.Context, job *queue.Job) {
-	log.Printf("processing job %s (%s)", job.ID, job.Type)
+	log.Printf("[w%d] processing job %s (%s)", w.id, job.ID, job.Type)
 	h, err := w.reg.Get(job.Type)
 	if err != nil {
-		log.Printf("job %s: %v", job.ID, err)
+		log.Printf("job %s: %v", w.id, job.ID, err)
 		w.q.Ack(ctx, job) // Phase 3: DLQ instead
 		return
 	}
 	if err := h(ctx, job.Payload); err != nil {
-		log.Printf("job %s failed: %v", job.ID, err) // Phase 3: retry logic here
+		log.Printf("[w%d] job %s failed: %v", w.id, job.ID, err) // Phase 3: retry logic here
 	}
 	w.q.Ack(ctx, job)
-	log.Printf("job %s done", job.ID)
+	log.Printf("[w%d] job %s done", w.id, job.ID)
 }

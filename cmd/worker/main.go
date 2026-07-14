@@ -31,7 +31,7 @@ func main() {
 	})
 
 	// seed some jobs for testing
-	for i := 0; i < 5; i++ {
+	for i := 0; i < 20; i++ {
 		j, _ := queue.NewJob("send_email", map[string]string{
 			"To": fmt.Sprintf("user%d@test.com", i), "Subject": "hello",
 		})
@@ -40,5 +40,5 @@ func main() {
 		}
 	}
 
-	worker.New(q, reg).Run(ctx)
+	worker.NewPool(q, reg, 4).Run(ctx)
 }
