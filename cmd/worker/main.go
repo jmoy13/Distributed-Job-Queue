@@ -6,20 +6,24 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"net/http"
+	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/jmoy13/distributed-job-queue/internal/queue"
 	"github.com/jmoy13/distributed-job-queue/internal/store"
 	"github.com/jmoy13/distributed-job-queue/internal/worker"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	q := queue.New("localhost:6379")
+	q := queue.New(env("REDIS_ADDR", "localhost:6379"))
 
 	reg := worker.NewRegistry()
 	reg.Register("send_email", func(ctx context.Context, payload json.RawMessage) error {
@@ -56,9 +60,22 @@ func main() {
 		}
 	}
 
-	st, err := store.New(ctx, "postgres://postgres:devpass@localhost:5432/jobqueue")
+	st, err := store.New(ctx, env("DATABASE_URL", "postgres://postgres:devpass@localhost:5432/jobqueue"))
+
 	if err != nil {
 		log.Fatal(err)
 	}
-	worker.NewPool(q, reg, st, 4).Run(ctx)
+	go func() {
+		http.Handle("/metrics", promhttp.Handler())
+		http.ListenAndServe(":9090", nil)
+	}()
+	size, _ := strconv.Atoi(env("WORKER_COUNT", "4"))
+	worker.NewPool(q, reg, st, size).Run(ctx)
+}
+
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }

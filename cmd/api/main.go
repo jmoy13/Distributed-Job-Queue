@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"os"
 	"os/signal"
 	"syscall"
 	"time"
@@ -17,8 +18,8 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	q := queue.New("localhost:6379")
-	st, err := store.New(ctx, "postgres://postgres:devpass@localhost:5432/jobqueue")
+	q := queue.New(env("REDIS_ADDR", "localhost:6379"))
+	st, err := store.New(ctx, env("DATABASE_URL", "postgres://postgres:devpass@localhost:5432/jobqueue"))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -36,4 +37,11 @@ func main() {
 	defer cancel()
 	srv.Shutdown(shutCtx)
 	log.Println("API stopped")
+}
+
+func env(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
