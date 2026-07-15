@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jmoy13/distributed-job-queue/internal/queue"
+	"github.com/jmoy13/distributed-job-queue/internal/store"
 	"github.com/jmoy13/distributed-job-queue/internal/worker"
 )
 
@@ -55,6 +56,9 @@ func main() {
 		}
 	}
 
-	go worker.RunMaintenance(ctx, q)
-	worker.NewPool(q, reg, 4).Run(ctx)
+	st, err := store.New(ctx, "postgres://postgres:devpass@localhost:5432/jobqueue")
+	if err != nil {
+		log.Fatal(err)
+	}
+	worker.NewPool(q, reg, st, 4).Run(ctx)
 }

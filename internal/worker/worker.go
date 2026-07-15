@@ -7,17 +7,19 @@ import (
 	"time"
 
 	"github.com/jmoy13/distributed-job-queue/internal/queue"
+	"github.com/jmoy13/distributed-job-queue/internal/store"
 	"github.com/redis/go-redis/v9"
 )
 
 type Worker struct {
 	q   *queue.Queue
 	reg *Registry
+	st  *store.Store
 	id  int
 }
 
-func New(q *queue.Queue, reg *Registry) *Worker {
-	return &Worker{q: q, reg: reg}
+func New(q *queue.Queue, reg *Registry, st *store.Store) *Worker {
+	return &Worker{q: q, reg: reg, st: st}
 }
 
 func (w *Worker) Run(ctx context.Context) {
@@ -44,23 +46,38 @@ func (w *Worker) Run(ctx context.Context) {
 }
 
 func (w *Worker) process(ctx context.Context, job *queue.Job) {
-	log.Printf("[w%d] processing job %s (%s)", w.id, job.ID, job.Type)
-	h, err := w.reg.Get(job.Type)
-	if err != nil {
-		log.Printf("job %s: %v", w.id, job.ID, err)
-		job.Attempts = job.MaxRetries // force DLQ
-		w.q.Fail(ctx, job)
-		return
-	}
+	log.Printf("[w%d] processing job %s (%s) attempt %d", w.id, job.ID, job.Type, job.Attempts+1)
+
+	// detached context so cleanup works during shutdown
 	ackCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := h(ctx, job.Payload); err != nil {
-		log.Printf("[w%d] job %s failed: %v", w.id, job.ID, err)
+
+	// status: running
+	w.st.SetStatus(ackCtx, job.ID, "running", "", job.Attempts)
+
+	h, err := w.reg.Get(job.Type)
+	if err != nil {
+		log.Printf("[w%d] job %s: %v -> DLQ", w.id, job.ID, err)
+		job.Attempts = job.MaxRetries // force DLQ
 		w.q.Fail(ackCtx, job)
+		w.st.SetStatus(ackCtx, job.ID, "dead", err.Error(), job.Attempts)
 		return
 	}
+
+	if err := h(ctx, job.Payload); err != nil {
+		log.Printf("[w%d] job %s failed: %v", w.id, job.ID, err)
+		w.q.Fail(ackCtx, job) // increments job.Attempts
+		status := "retrying"
+		if job.Attempts >= job.MaxRetries {
+			status = "dead"
+		}
+		w.st.SetStatus(ackCtx, job.ID, status, err.Error(), job.Attempts)
+		return
+	}
+
 	if err := w.q.Ack(ackCtx, job); err != nil {
 		log.Printf("[w%d] ack failed for %s: %v", w.id, job.ID, err)
 	}
+	w.st.SetStatus(ackCtx, job.ID, "succeeded", "", job.Attempts)
 	log.Printf("[w%d] job %s done", w.id, job.ID)
 }
